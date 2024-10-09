@@ -3,55 +3,45 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    Integer(i64),
-    Symbol(String),
+    Atom(String),
     LParen,
     RParen,
 }
 
-impl fmt::Display for Token {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Token::Integer(n) => write!(f, "{}", n),
-            Token::Symbol(s) => write!(f, "{}", s),
-            Token::LParen => write!(f, "("),
-            Token::RParen => write!(f, ")"),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct TokenError {
-    ch: char,
+    message: String,
 }
 
 impl Error for TokenError {}
 
 impl fmt::Display for TokenError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "unexpected character: {}", self.ch)
+        write!(f, "Token error: {}", self.message)
+    }
+}
+
+trait Tokenizable {
+    fn tokenize(&self) -> Result<Token, TokenError>;
+}
+
+impl Tokenizable for &str {
+    fn tokenize(&self) -> Result<Token, TokenError> {
+        match *self {
+            "(" => Ok(Token::LParen),
+            ")" => Ok(Token::RParen),
+            _ => Ok(Token::Atom(self.to_string())),
+        }
     }
 }
 
 pub fn tokenize(program: &str) -> Result<Vec<Token>, TokenError> {
-    let program2 = program.replace("(", " ( ").replace(")", " ) ");
-    let words = program2.split_whitespace();
-    let mut tokens: Vec<Token> = Vec::new();
-    for word in words {
-        match word {
-            "(" => tokens.push(Token::LParen),
-            ")" => tokens.push(Token::RParen),
-            _ => {
-                let i = word.parse::<i64>();
-                if i.is_ok() {
-                    tokens.push(Token::Integer(i.unwrap()));
-                } else {
-                    tokens.push(Token::Symbol(word.to_string()));
-                }
-            }
-        }
-    }
-    Ok(tokens)
+    program
+        .replace("(", " ( ")
+        .replace(")", " ) ")
+        .split_whitespace()
+        .map(|word| word.tokenize())
+        .collect()
 }
 
 #[cfg(test)]
@@ -60,14 +50,14 @@ mod tests {
 
     #[test]
     fn test_add() {
-        let tokens = tokenize("(+ 1 2)").unwrap_or(vec![]);
+        let tokens = tokenize("(+ 1 2)").unwrap();
         assert_eq!(
             tokens,
             vec![
                 Token::LParen,
-                Token::Symbol("+".to_string()),
-                Token::Integer(1),
-                Token::Integer(2),
+                Token::Atom("+".to_string()),
+                Token::Atom("1".to_string()),
+                Token::Atom("2".to_string()),
                 Token::RParen,
             ]
         );
@@ -82,28 +72,28 @@ mod tests {
                 (* pi (* r r))
             )
         ";
-        let tokens = tokenize(program).unwrap_or(vec![]);
+        let tokens = tokenize(program).unwrap();
         assert_eq!(
             tokens,
             vec![
                 Token::LParen,
                 Token::LParen,
-                Token::Symbol("define".to_string()),
-                Token::Symbol("r".to_string()),
-                Token::Integer(10),
+                Token::Atom("define".to_string()),
+                Token::Atom("r".to_string()),
+                Token::Atom("10".to_string()),
                 Token::RParen,
                 Token::LParen,
-                Token::Symbol("define".to_string()),
-                Token::Symbol("pi".to_string()),
-                Token::Integer(314),
+                Token::Atom("define".to_string()),
+                Token::Atom("pi".to_string()),
+                Token::Atom("314".to_string()),
                 Token::RParen,
                 Token::LParen,
-                Token::Symbol("*".to_string()),
-                Token::Symbol("pi".to_string()),
+                Token::Atom("*".to_string()),
+                Token::Atom("pi".to_string()),
                 Token::LParen,
-                Token::Symbol("*".to_string()),
-                Token::Symbol("r".to_string()),
-                Token::Symbol("r".to_string()),
+                Token::Atom("*".to_string()),
+                Token::Atom("r".to_string()),
+                Token::Atom("r".to_string()),
                 Token::RParen,
                 Token::RParen,
                 Token::RParen

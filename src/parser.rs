@@ -17,63 +17,73 @@ impl fmt::Display for ParseError {
 impl Error for ParseError {}
 
 pub fn parse(program: &str) -> Result<Object, ParseError> {
-    let token_result = tokenize(program);
-    if token_result.is_err() {
-        return Err(ParseError {
-            err: format!("{}", token_result.err().unwrap()),
-        });
-    }
+    let tokens = tokenize(program).map_err(|err| ParseError {
+        err: format!("{}", err),
+    })?;
 
-    let mut tokens = token_result.unwrap().into_iter().rev().collect::<Vec<_>>();
-    let parsed_list = parse_list(&mut tokens)?;
-    Ok(parsed_list)
+    let mut iter = tokens.iter();
+    parse_expression(&mut iter)
 }
 
-fn parse_list(tokens: &mut Vec<Token>) -> Result<Object, ParseError> {
-    let token = tokens.pop();
-    if token != Some(Token::LParen) {
-        return Err(ParseError {
-            err: format!("Expected LParen, found {:?}", token),
-        });
+fn parse_expression<'a, I>(tokens: &mut I) -> Result<Object, ParseError>
+where
+    I: Iterator<Item = &'a Token>,
+{
+    match tokens.next() {
+        Some(Token::LParen) => parse_iter(tokens),
+        Some(Token::RParen) => Err(ParseError {
+            err: "Unexpected closing parenthesis".to_string(),
+        }),
+        Some(token) => Object::from_token(token).map_err(|_| ParseError {
+            err: format!("Unexpected token: {:?}", token),
+        }),
+        None => Err(ParseError {
+            err: "Unexpected end of input".to_string(),
+        }),
     }
+}
 
-    let mut list: Vec<Object> = Vec::new();
-    while !tokens.is_empty() {
-        let token = tokens.pop();
-        if token == None {
-            return Err(ParseError {
-                err: format!("Did not find enough tokens"),
-            });
-        }
-        let t = token.unwrap();
-        match t {
-            Token::Integer(n) => list.push(Object::Integer(n)),
-            Token::Symbol(s) => list.push(Object::Symbol(s)),
-            Token::LParen => {
-                tokens.push(Token::LParen);
-                let sub_list = parse_list(tokens)?;
-                list.push(sub_list);
+fn parse_iter<'a, I>(tokens: &mut I) -> Result<Object, ParseError>
+where
+    I: Iterator<Item = &'a Token>,
+{
+    let mut elements = Vec::new();
+
+    loop {
+        match tokens.next() {
+            Some(Token::RParen) => return Ok(Object::List(elements)),
+            Some(token) => {
+                let element = match token {
+                    Token::LParen => parse_iter(tokens)?,
+                    _ => Object::from_token(token).map_err(|_| ParseError {
+                        err: format!("Unexpected token: {:?}", token),
+                    })?,
+                };
+                elements.push(element);
             }
-            Token::RParen => {
-                return Ok(Object::List(list));
+            None => {
+                return Err(ParseError {
+                    err: "Unmatched opening parenthesis".to_string(),
+                })
             }
         }
     }
-
-    Ok(Object::List(list))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lexer::tokenize;
+    use crate::object::{Object, Operator, Keyword};
 
     #[test]
     fn test_add() {
-        let list = parse("(+ 1 2)").unwrap();
+        let tokens = tokenize("(+ 1 2)").unwrap();
+        let list = parse_expression(&mut tokens.iter()).unwrap();
         assert_eq!(
             list,
             Object::List(vec![
-                Object::Symbol("+".to_string()),
+                Object::Operator(Operator::Add),
                 Object::Integer(1),
                 Object::Integer(2),
             ])
@@ -82,34 +92,57 @@ mod tests {
 
     #[test]
     fn test_area_of_a_circle() {
-        let program = "(
-                         (define r 10)
-                         (define pi 314)
-                         (* pi (* r r))
-                       )";
-        let list = parse(program).unwrap();
+        let program = "
+            (
+                (define r 10)
+                (define pi 314)
+                (* pi (* r r))
+            )
+        ";
+        let tokens = tokenize(program).unwrap();
+        let list = parse_expression(&mut tokens.iter()).unwrap();
         assert_eq!(
             list,
             Object::List(vec![
                 Object::List(vec![
-                    Object::Symbol("define".to_string()),
+                    Object::Keyword(Keyword::Define),
                     Object::Symbol("r".to_string()),
                     Object::Integer(10),
                 ]),
                 Object::List(vec![
-                    Object::Symbol("define".to_string()),
+                    Object::Keyword(Keyword::Define),
                     Object::Symbol("pi".to_string()),
                     Object::Integer(314),
                 ]),
                 Object::List(vec![
-                    Object::Symbol("*".to_string()),
+                    Object::Operator(Operator::Multiply),
                     Object::Symbol("pi".to_string()),
                     Object::List(vec![
-                        Object::Symbol("*".to_string()),
+                        Object::Operator(Operator::Multiply),
                         Object::Symbol("r".to_string()),
                         Object::Symbol("r".to_string()),
                     ]),
                 ]),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_if_expression() {
+        let program = "(if (< 1 2) 3 4)";
+        let tokens = tokenize(program).unwrap();
+        let list = parse_expression(&mut tokens.iter()).unwrap();
+        assert_eq!(
+            list,
+            Object::List(vec![
+                Object::Keyword(Keyword::If),
+                Object::List(vec![
+                    Object::Operator(Operator::LessThan),
+                    Object::Integer(1),
+                    Object::Integer(2),
+                ]),
+                Object::Integer(3),
+                Object::Integer(4),
             ])
         );
     }
